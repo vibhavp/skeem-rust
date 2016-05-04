@@ -1,9 +1,4 @@
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn it_works() {
-    }
-}
+#![feature(rc_counts)]
 
 mod types;
 mod mem;
