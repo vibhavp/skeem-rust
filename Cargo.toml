@@ -1,0 +1,6 @@
+[package]
+name = "skeem"
+version = "0.1.0"
+authors = ["Vibhav Pant <vibhavp@gmail.com>"]
+
+[dependencies]
