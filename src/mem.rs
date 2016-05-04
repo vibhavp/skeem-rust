@@ -64,7 +64,7 @@ impl Interpreter {
         }
     }
 
-    fn gc(&mut self) -> u64 {
+    pub fn gc(&mut self) -> u64 {
         let mut count = 0 as u64;
         self.mark_all();
 
@@ -85,17 +85,29 @@ mod test {
     use super::*;
     use types::{Object, Type};
     use std::string::ToString;
-    
+    use std::rc::Rc;
+
     #[test]
     fn test_gc() {
-        let mut obj = Object::new(Type::String("abcd".to_string()));
         let mut interpreter = Interpreter::new();
-        interpreter.new_object(obj.clone());
-        interpreter.insert_symbol("test".to_string(), obj.clone());
-        assert_eq!(interpreter.gc(), 0);
-        
-        obj= Object::new(Type::String("abcd".to_string()));
-        interpreter.new_object(obj.clone());
-        assert_eq!(interpreter.gc(), 1);
+
+        {
+            let mut obj = Object::new(Type::String("abcd".to_string()));
+            {
+                interpreter.new_object(obj.clone());
+                interpreter.insert_symbol("test".to_string(), obj.clone());
+                interpreter.insert_symbol("test2".to_string(), obj.clone());
+            }
+            assert_eq!(interpreter.gc(), 0);
+
+            obj = Object::new(Type::String("abcd".to_string()));
+            interpreter.new_object(obj.clone());
+            assert_eq!(interpreter.gc(), 1);
+            assert_eq!(interpreter.gc(), 0);
+        }
+
+        for obj in interpreter.live_objects.into_iter() {
+            assert_eq!(Rc::strong_count(&obj), 3)
+        }
     }
 }
