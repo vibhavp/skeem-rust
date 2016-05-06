@@ -8,6 +8,7 @@ use std::ops::Add;
 use std::ops::Mul;
 use std::ops::Div;
 use std::fmt;
+use std::option::Option;
 
 pub type HeapObject = Rc<RefCell<Box<Object>>>;
 pub type list = LinkedList<HeapObject>;
@@ -31,20 +32,23 @@ pub struct Object {
 }
 
 pub struct Proc {
-    pub params: Object, //type is Cons
-    pub body: Object, //type is Cons
+    pub env: Option<HeapObject>, //type is environment
+    pub params: HeapObject, //type is Cons
+    pub body: HeapObject, //type is Cons
 }
 
 impl Proc {
     fn mark(&mut self) {
-        self.params.mark();
-        self.body.mark();
+        if let Some(ref mut env) = self.env {
+            env.borrow_mut().mark();
+        }
+        self.params.borrow_mut().mark();
+        self.body.borrow_mut().mark();
     }
 }
 
 pub enum Procedure {
-    Lambda (Proc),
-    Closure {env: Object, procedure: Proc}, //env type is Environment
+    Lambda (Proc), //env type is Environment
     Primitive(&'static Fn(list) -> Object)
 }
 
@@ -82,8 +86,7 @@ impl Object {
 
     fn mark_procedure(procedure: &mut Procedure) {
         match procedure {
-            &mut Procedure::Lambda(ref mut lambda) => {lambda.mark();},
-            &mut Procedure::Closure{ref mut env, ref mut procedure} => {env.mark(); procedure.mark();},
+            &mut Procedure::Lambda(ref mut procedure) => {procedure.mark();},
             &mut Procedure::Primitive(_) => {},
         }
     }
@@ -260,11 +263,11 @@ mod test {
             Type::Float(n) => {assert_eq!(n, 3.0)},
             _ => panic!("o3 should be a float")
         };
-        
+
         let mut o3 = Object::new(Type::Integer(2)) * Object::new(Type::Float(2.0));
         match o3.object_type {
             Type::Float(n) => {assert_eq!(n, 4.0)},
             _ => panic!("o3 should be a float")
-        };   
+        };
     }
 }
