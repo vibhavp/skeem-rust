@@ -2,4 +2,5 @@
 
 mod types;
 mod interpreter;
-mod err;
+mod error;
+mod environment;
