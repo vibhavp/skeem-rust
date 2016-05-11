@@ -34,6 +34,7 @@ impl Interpreter {
 
         for i in 0..self.live_objects.len() {
             if !self.live_objects[i].borrow().marked {
+                //println!("{}", *self.live_objects[i].borrow());
                 self.live_objects.swap_remove(i);
                 count += 1;
                 continue;
@@ -122,16 +123,35 @@ mod test {
     fn test_gc() {
         let mut interpreter = Interpreter::new();
 
-        let obj = interpreter.new_object(Type::String("foobar".to_string()));
-        interpreter.environment.push();
-        interpreter.environment.insert_sym("test".to_string(), obj.clone());
+        {
+            let obj = interpreter.new_object(Type::String("foobar".to_string()));
+            interpreter.environment.push();
+            interpreter.environment.insert_sym("test".to_string(), obj);
+        }
         assert_eq!(interpreter.gc(), 0);
+        assert_eq!(interpreter.live_objects.len(), 1);
         interpreter.environment.pop();
         assert_eq!(interpreter.gc(), 1);
+        assert_eq!(interpreter.live_objects.len(), 0);
         
         interpreter.new_object(Type::String("foobar".to_string()));
         assert_eq!(interpreter.gc(), 1);
         assert_eq!(interpreter.gc(), 0);
-       
+
+    }
+
+    #[test]
+    fn test_sym_found() {
+        let mut interpreter = Interpreter::new();
+        let obj = interpreter.new_object(Type::String("foobar".to_string()));
+        interpreter.environment.insert_sym("test".to_string(), obj);
+        interpreter.environment.find_sym("test".to_string()).expect("");
+    }
+
+    #[should_panic]
+    #[test]
+    fn test_sym_not_found() {
+        let mut interpreter = Interpreter::new();
+        interpreter.environment.find_sym("abcd".to_string()).expect("");
     }
 }
