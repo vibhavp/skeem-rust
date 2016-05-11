@@ -29,6 +29,14 @@ impl Environment {
     }
 
     pub fn find_sym(&self, name: String) -> Result<&HeapObject, Err> {
+        if self.0.len() == 1 {
+            let val = self.0[0].get(&name);
+            return match val {
+                Option::Some(val) => Result::Ok(val),
+                Option::None => Result::Err(Err::SymbolNotFound(name))
+            }
+        }
+
         for i in self.0.len()-1..0 {
             if let Option::Some(val) = self.0[i].get(&name) {
                 return Result::Ok(val)
