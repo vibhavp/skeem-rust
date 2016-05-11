@@ -1,4 +1,5 @@
 use error::Err;
+use environment::Environment;
 
 use std::collections::LinkedList;
 use std::boxed::Box;
@@ -32,7 +33,7 @@ pub struct Object {
 }
 
 pub struct Lambda {
-    pub env: Option<HeapObject>, //type is environment
+    pub env: Option<Environment>, //type is environment
     pub params: HeapObject, //type is Cons
     pub body: HeapObject, //type is Cons
 }
@@ -40,7 +41,7 @@ pub struct Lambda {
 impl Lambda {
     fn mark(&mut self) {
         if let Some(ref mut env) = self.env {
-            env.borrow_mut().mark();
+            env.mark_all();
         }
         self.params.borrow_mut().mark();
         self.body.borrow_mut().mark();
