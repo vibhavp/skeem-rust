@@ -1,6 +1,6 @@
-use err::Err;
+use error::Err;
 
-use std::collections::{LinkedList, HashMap};
+use std::collections::LinkedList;
 use std::boxed::Box;
 use std::rc::Rc;
 use std::cell::RefCell;
@@ -11,8 +11,7 @@ use std::fmt;
 use std::option::Option;
 
 pub type HeapObject = Rc<RefCell<Box<Object>>>;
-pub type list = LinkedList<HeapObject>;
-pub type environment = HashMap<String, HeapObject>;
+pub type List = LinkedList<HeapObject>;
 
 pub enum Type {
     Bool(bool),
@@ -20,10 +19,11 @@ pub enum Type {
     Float(f64),
     Character(char),
     String(String),
+    Symbol(String),
 
-    Cons(Box<list>),
-    Environment(Box<environment>),
+    Cons(Box<List>),
     Procedure(Box<Procedure>),
+    Nil,
 }
 
 pub struct Object {
@@ -31,13 +31,13 @@ pub struct Object {
     pub marked: bool,
 }
 
-pub struct Proc {
+pub struct Lambda {
     pub env: Option<HeapObject>, //type is environment
     pub params: HeapObject, //type is Cons
     pub body: HeapObject, //type is Cons
 }
 
-impl Proc {
+impl Lambda {
     fn mark(&mut self) {
         if let Some(ref mut env) = self.env {
             env.borrow_mut().mark();
@@ -48,13 +48,22 @@ impl Proc {
 }
 
 pub enum Procedure {
-    Lambda (Proc), //env type is Environment
-    Primitive(&'static Fn(list) -> Object)
+    Lambda (Lambda), //env type is Environment
+    Primitive(&'static Fn(&List) -> Result<HeapObject, Err>)
 }
 
 impl Object {
     pub fn new(t: Type) -> Object {
         Object{object_type: t, marked: false}
+    }
+
+    #[inline(always)]
+    pub fn unwrap_list(&self) -> &List {
+        if let Type::Cons(ref l) = self.object_type {
+            l
+        } else {
+            panic!("object is not a list")
+        }
     }
 
     pub fn get_type_string(&self) -> &'static str {
@@ -66,11 +75,12 @@ impl Object {
             Type::String(_) => "string",
             Type::Cons(_) => "list",
             Type::Procedure(_) => "procedure",
-            Type::Environment(_) => "environment",
+            Type::Symbol(_) => "symbol",
+            Type::Nil => "nil"
         }
     }
 
-    fn mark(&mut self) {
+    pub fn mark(&mut self) {
         if self.marked {
             return
         }
@@ -78,7 +88,6 @@ impl Object {
         self.marked = true;
         match self.object_type {
             Type::Cons(ref mut cons) => Object::mark_list(cons),
-            Type::Environment(ref mut env) => Object::mark_environment(env),
             Type::Procedure(ref mut procedure) => Object::mark_procedure(procedure.as_mut()),
             _ => {},
         };
@@ -91,19 +100,13 @@ impl Object {
         }
     }
 
-    pub fn mark_environment(env: &mut environment) {
-        for (_, object) in env {
-            object.borrow_mut().marked = true;
-        }
-    }
-
-    fn mark_list(cons: &mut list) {
+    fn mark_list(cons: &mut List) {
         for obj in cons {
             obj.borrow_mut().mark();
         }
     }
 
-    pub fn add_list(nums: &list) -> Result<Object, Err> {
+    pub fn add_list(nums: &List) -> Result<Object, Err> {
         let mut sum = Object::new(Type::Integer(0));
         for obj in nums {
             match obj.borrow().object_type {
@@ -116,20 +119,21 @@ impl Object {
         Result::Ok(sum)
     }
 
-    pub fn sub_list(nums: &list) -> Result<Object, Err> {
+    pub fn sub_list(nums: &List) -> Result<Object, Err> {
         let mut sum = Object::new(Type::Integer(0));
         for obj in nums {
             match obj.borrow().object_type {
                 Type::Float(n) => {sum = sum + Object::new(Type::Float(-n))},
                 Type::Integer(n) => {sum = sum + Object::new(Type::Integer(-n))}
                 _ => return Result::Err(Err::WrongType{wanted: "numberp", got: obj.borrow().get_type_string()})
-            }
+
+           }
         }
 
         Result::Ok(sum)
     }
 
-    pub fn mul_list(nums: &list) -> Result<Object, Err> {
+    pub fn mul_list(nums: &List) -> Result<Object, Err> {
         let mut prod = Object::new(Type::Integer(0));
         for obj in nums {
             match obj.borrow().object_type {
@@ -143,7 +147,7 @@ impl Object {
 
     }
 
-    pub fn div_list(nums: &list) -> Result<Object, Err> {
+    pub fn div_list(nums: &List) -> Result<Object, Err> {
         let mut prod = Object::new(Type::Integer(0));
         for obj in nums {
             match obj.borrow().object_type {
@@ -201,9 +205,8 @@ impl fmt::Display for Object {
             Type::Procedure(_) => {
                 write!(f, "procedure")
             },
-            Type::Environment(_) => {
-                write!(f, "environment")
-            }
+            Type::Nil => write!(f, "nil"),
+            Type::Symbol(_) => panic!("write! used on symbol")
         }
     }
 }
