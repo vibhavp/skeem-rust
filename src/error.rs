@@ -19,3 +19,9 @@ impl fmt::Display for Err {
         }
     }
 }
+
+impl fmt::Debug for Err {
+    fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+        write!(f, "{}", self)
+    }
+}
