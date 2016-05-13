@@ -14,6 +14,10 @@ use std::option::Option;
 pub type HeapObject = Rc<RefCell<Box<Object>>>;
 pub type List = LinkedList<HeapObject>;
 
+pub fn new_list() -> List {
+    LinkedList::new()
+}
+
 pub enum Type {
     Bool(bool),
     Integer(i64),
