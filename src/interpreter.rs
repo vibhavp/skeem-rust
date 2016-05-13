@@ -22,6 +22,10 @@ impl Interpreter {
         }
     }
 
+    pub fn new_nil(&mut self) -> HeapObject {
+        self.nil.clone()
+    }
+
     pub fn new_object(&mut self, t: Type) -> HeapObject {
         let obj = Rc::new(RefCell::new(Box::new(Object::new(t))));
         self.live_objects.push(obj.clone());
@@ -133,7 +137,7 @@ mod test {
         interpreter.environment.pop();
         assert_eq!(interpreter.gc(), 1);
         assert_eq!(interpreter.live_objects.len(), 0);
-        
+
         interpreter.new_object(Type::String("foobar".to_string()));
         assert_eq!(interpreter.gc(), 1);
         assert_eq!(interpreter.gc(), 0);
