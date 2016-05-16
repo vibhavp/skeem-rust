@@ -1,7 +1,6 @@
-use types::{Object, Type, HeapObject, Lambda, Procedure, List};
+use types::{Object, Type, HeapObject, Lambda, Procedure, List, new_list};
 use error::Err;
 use environment::Environment;
-
 use std::option::Option;
 use std::result::Result;
 use std::rc::Rc;
@@ -11,6 +10,11 @@ pub struct Interpreter {
     live_objects: Vec<HeapObject>,
     environment: Environment,
     nil: HeapObject,
+    bool_true: HeapObject,
+    bool_false: HeapObject,
+    gc_disabled: bool,
+    bytes_alloc: usize,
+    gc_threshold: usize,
 }
 
 impl Interpreter {
@@ -18,33 +22,70 @@ impl Interpreter {
         Interpreter{
             live_objects: Vec::new(),
             environment: Environment::new(),
-            nil: Rc::new(RefCell::new(Box::new(Object::new(Type::Nil))))
+            nil: Rc::new(RefCell::new(Box::new(Object::new(Type::Cons(Box::new(new_list())))))),
+            bool_true: Rc::new(RefCell::new(Box::new(Object::new(Type::Bool(true))))),
+            bool_false: Rc::new(RefCell::new(Box::new(Object::new(Type::Bool(false))))),
+            gc_disabled: false,
+            bytes_alloc: 0,
+            gc_threshold: 0,
         }
     }
 
-    pub fn new_nil(&mut self) -> HeapObject {
-        self.nil.clone()
-    }
+    #[inline]
+    pub fn new_nil(&self) -> HeapObject {self.nil.clone()}
+    #[inline]
+    pub fn new_true(&self) -> HeapObject {self.bool_true.clone()}
+    #[inline]
+    pub fn new_false(&self) -> HeapObject {self.bool_false.clone()}
 
     pub fn new_object(&mut self, t: Type) -> HeapObject {
+        self.bytes_alloc += t.size_of();
+        if self.bytes_alloc > self.gc_threshold {
+            self.gc_threshold = self.bytes_alloc/2;
+            let n = self.gc();
+            if cfg!(debug) {
+                println!("GC, freed {} items", n);
+            }
+        }
+
         let obj = Rc::new(RefCell::new(Box::new(Object::new(t))));
         self.live_objects.push(obj.clone());
         obj
     }
 
-    fn gc(&mut self) -> u64 {
-        let mut count = 0 as u64;
+    #[inline(always)]
+    pub fn gc_disable(&mut self) {
+        self.gc_disabled = true;
+    }
+    #[inline(always)]
+    pub fn gc_enable(&mut self) {
+        self.gc_disabled = false;
+    }
+
+    fn gc(&mut self) -> usize {
+        if self.gc_disabled {
+            return 0
+        }
+        let mut count = 0;
         self.environment.mark_all();
+        let mut indices = Vec::<usize>::new();
 
         for i in 0..self.live_objects.len() {
             if !self.live_objects[i].borrow().marked {
-                //println!("{}", *self.live_objects[i].borrow());
-                self.live_objects.swap_remove(i);
+                self.bytes_alloc -= self.live_objects[i].borrow().object_type.size_of();
+                assert_eq!(Rc::strong_count(&self.live_objects[i]), 1);
+                assert_eq!(Rc::weak_count(&self.live_objects[i]), 0);
+                indices.push(i);
                 count += 1;
                 continue;
             }
 
             self.live_objects[i].borrow_mut().marked = false;
+        }
+
+        indices.reverse();
+        for i in indices {
+            self.live_objects.swap_remove(i);
         }
 
         count
@@ -60,6 +101,8 @@ impl Interpreter {
 
         let mut last = self.nil.clone();
 
+        let mut iter = exp.iter();
+        iter.next();
         // (lambda (a r g s) body)
         for obj in exp.iter().skip(2) {
             let res = self.eval(obj.clone());
@@ -84,8 +127,8 @@ impl Interpreter {
     fn eval_cons(&mut self, c: &List) -> Result<HeapObject, Err> {
         let frontopt = c.front();
 
-        if let Option::None = frontopt {
-            return Result::Err(Err::EmptyList);
+        if let Option::None = frontopt { //empty list
+            return Result::Ok(self.new_nil());
         }
 
         let front = self.eval(frontopt.unwrap().clone());
@@ -127,21 +170,21 @@ mod test {
     fn test_gc() {
         let mut interpreter = Interpreter::new();
 
-        {
-            let obj = interpreter.new_object(Type::String("foobar".to_string()));
-            interpreter.environment.push();
-            interpreter.environment.insert_sym("test".to_string(), obj);
-        }
+        let obj = interpreter.new_object(Type::String("foobar".to_string()));
+        interpreter.environment.push();
+        interpreter.environment.insert_sym("test".to_string(), obj);
         assert_eq!(interpreter.gc(), 0);
         assert_eq!(interpreter.live_objects.len(), 1);
         interpreter.environment.pop();
         assert_eq!(interpreter.gc(), 1);
         assert_eq!(interpreter.live_objects.len(), 0);
 
-        interpreter.new_object(Type::String("foobar".to_string()));
-        assert_eq!(interpreter.gc(), 1);
-        assert_eq!(interpreter.gc(), 0);
+        for _ in 0..10 {
+            interpreter.new_object(Type::String("foobar".to_string()));
+        }
 
+        assert_eq!(interpreter.gc(), 10);
+        assert_eq!(interpreter.gc(), 0);
     }
 
     #[test]
@@ -155,7 +198,7 @@ mod test {
     #[should_panic]
     #[test]
     fn test_sym_not_found() {
-        let mut interpreter = Interpreter::new();
+        let interpreter = Interpreter::new();
         interpreter.environment.find_sym("abcd".to_string()).expect("");
     }
 }
