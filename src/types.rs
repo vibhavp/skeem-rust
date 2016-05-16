@@ -1,6 +1,5 @@
 use error::Err;
 use environment::Environment;
-
 use std::collections::LinkedList;
 use std::boxed::Box;
 use std::rc::Rc;
@@ -10,6 +9,7 @@ use std::ops::Mul;
 use std::ops::Div;
 use std::fmt;
 use std::option::Option;
+use std::mem::size_of;
 
 pub type HeapObject = Rc<RefCell<Box<Object>>>;
 pub type List = LinkedList<HeapObject>;
@@ -28,7 +28,24 @@ pub enum Type {
 
     Cons(Box<List>),
     Procedure(Box<Procedure>),
-    Nil,
+}
+
+impl Type {
+    pub fn size_of(&self) -> usize {
+        match self {
+            &Type::Bool(_) => size_of::<bool>(),
+            &Type::Integer(_) => size_of::<i64>(),
+            &Type::Float(_) => size_of::<f64>(),
+            &Type::Character(_) => size_of::<char>(),
+            &Type::String(ref s) | &Type::Symbol(ref s) => size_of::<u8>() * s.capacity(),
+            &Type::Cons(_) => size_of::<List>(),
+            &Type::Procedure(ref p) => {
+                if let &Procedure::Lambda(_) = p.as_ref() {
+                    size_of::<Lambda>()
+                } else {0}
+            }
+        }
+    }
 }
 
 pub struct Object {
@@ -59,10 +76,10 @@ pub enum Procedure {
 
 impl Object {
     pub fn new(t: Type) -> Object {
-        Object{object_type: t, marked: false}
+        Object{object_type: t, marked: true}
     }
 
-    #[inline(always)]
+    #[inline]
     pub fn unwrap_list(&self) -> &List {
         if let Type::Cons(ref l) = self.object_type {
             l
@@ -81,7 +98,6 @@ impl Object {
             Type::Cons(_) => "list",
             Type::Procedure(_) => "procedure",
             Type::Symbol(_) => "symbol",
-            Type::Nil => "nil"
         }
     }
 
@@ -149,7 +165,6 @@ impl Object {
         }
 
         Result::Ok(prod)
-
     }
 
     pub fn div_list(nums: &List) -> Result<Object, Err> {
@@ -163,7 +178,6 @@ impl Object {
         }
 
         Result::Ok(prod)
-
     }
 }
 
@@ -196,8 +210,11 @@ impl fmt::Display for Object {
             Type::Integer(n) => write!(f,"{}", n),
             Type::Float(n) => write!(f, "{}", n),
             Type::Character(c) => write!(f, "?{}", c),
-            Type::String(ref s) => write!(f, "{}", s),
+            Type::String(ref s) => write!(f, "\"{}\"", s),
             Type::Cons(ref l) => {
+                if l.len() == 0 {
+                    return write!(f, "nil");
+                }
                 for obj in l.iter() {
                     let res = write!(f, "{}", *obj.borrow());
                     match res {
@@ -210,7 +227,6 @@ impl fmt::Display for Object {
             Type::Procedure(_) => {
                 write!(f, "procedure")
             },
-            Type::Nil => write!(f, "nil"),
             Type::Symbol(_) => panic!("write! used on symbol")
         }
     }
