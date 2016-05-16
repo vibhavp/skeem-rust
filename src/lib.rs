@@ -1,7 +1,6 @@
 #![feature(rc_counts)]
-#![feature(str_char)]
-mod types;
-mod interpreter;
-mod error;
+pub mod types;
+pub mod interpreter;
+pub mod error;
 mod environment;
-mod parse;
+pub mod parse;
