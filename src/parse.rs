@@ -5,6 +5,7 @@ use std::clone::Clone;
 use std::option::Option;
 use std::fmt;
 use std::str::FromStr;
+use std::fmt::Write;
 use interpreter::Interpreter;
 use types::{Type, new_list, HeapObject};
 
@@ -38,13 +39,22 @@ pub enum ScanError {
     InvalidChar,
 }
 
+impl fmt::Display for ScanError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match *self {
+            ScanError::UnmatchedParen => write!(f, "Unmatched Parenthesis"),
+            ScanError::InvalidChar => write!(f, "Invalid character syntax"),
+        }
+    }
+}
+
 pub struct Scanner {
     scanning_string: bool,
     scanning_char: bool,
     scanning_num: bool,
     scanning_float: bool,
     scanning_list_depth: usize,
-    tokens: Vec<Token>,
+    incomplete_str: Option<String>,
 }
 
 #[inline(always)]
@@ -60,21 +70,22 @@ impl Scanner{
             scanning_num: false,
             scanning_float: false,
             scanning_list_depth: 0,
-            tokens: Vec::new(),
+            incomplete_str: Option::None,
         }
     }
 
     #[inline(always)]
-    fn scanning(&self) -> bool {
+    fn scanning_incomplete(&self) -> bool {
         self.scanning_char || self.scanning_list_depth != 0 || self.scanning_string
     }
 
-    fn get_token(&self, word: &String) -> Option<Token> {
+    fn get_token(&mut self, word: &String) -> Option<Token> {
+        //println!("{} {}", word, word.len());
         if word.len() == 0 {
             return Option::None
         }
 
-        if self.scanning_num {
+        if self.scanning_num && !(word == "+" || word == "-") {
             if self.scanning_float {
                 let f = f64::from_str(word.clone().as_str()).unwrap();
                 return Option::Some(Token::Float(f));
@@ -83,19 +94,34 @@ impl Scanner{
             let n = i64::from_str(word.clone().as_str()).unwrap();
             return Option::Some(Token::Integer(n));
         }
-        return Option::Some(Token::Symbol(word.clone()))
+
+        return Option::Some(if self.scanning_string {
+            Token::String(word.clone())
+        } else {
+            Token::Symbol(word.clone())
+        })
     }
 
     //Option::Some represents a completed scan
     //Option::None represents an incomplete scan
     pub fn scan(&mut self, line: String) -> Option<Result<Box<Vec<Token>>, ScanError>> {
-        let mut tokens = if self.scanning() {self.tokens.clone()} else {Vec::new()};
+        let mut tokens = Vec::new();
         let mut word = String::new();
-        let chars = line.chars();
 
-        for (i, ch) in chars.enumerate() {
+        let actual_line = if let Option::Some(ref s) = self.incomplete_str {
+            let mut s = s.clone();
+            s.write_str(line.as_str()).expect("");
+            let (f, _) = s.split_at(s.len()-1);
+            String::from_str(f).unwrap()
+        } else {
+            let (f, _) = line.split_at(line.len()-1);
+            String::from_str(f).unwrap()
+        };
+
+        //println!("{}", actual_line);
+
+        for (i, ch) in actual_line.chars().enumerate() {
             let mut push_ch = false;
-
             match ch {
                 '\"' => {
                     if self.scanning_string {
@@ -131,7 +157,7 @@ impl Scanner{
                 },
                 _ => {
                     if self.scanning_char {
-                        if i < line.len() - 1 && !is_terminating_char(line.char_at(i+1)) {
+                        if i == line.len() - 2  {
                             return Option::Some(Result::Err(ScanError::InvalidChar));
                         }
 
@@ -149,34 +175,53 @@ impl Scanner{
             }
         }
 
-        //flush last token
-        self.get_token(&word).map(|t| {tokens.push(t)});
+        if self.scanning_incomplete() {
+            for token in tokens.clone() {
+                println!("{}", token);
+            }
 
-        if self.scanning() {
-            self.tokens = tokens;
+            let mut incomplete_str = actual_line.clone();
+            if self.scanning_string {
+                incomplete_str.push('\n');
+            }
+            self.incomplete_str = Option::Some(incomplete_str);
             Option::None
         } else {
+            for token in tokens.clone() {
+                println!("{}", token);
+            }
+            //flush last token
+            self.get_token(&word).map(|t| {tokens.push(t)});
             Option::Some(Result::Ok(Box::new(tokens)))
         }
     }
 }
 
-fn parse_list(tokens: &Vec<Token>, start: usize, interpreter: &mut Interpreter) -> Option<HeapObject> {
+pub fn parse_sexp(tokens: &Vec<Token>, interpreter: &mut Interpreter) -> Result<HeapObject, &'static str> {
+    if let Token::ParenOpen = tokens[0] {
+        Result::Ok(parse_list(&tokens, 1, interpreter))
+    } else {
+        if tokens.len() > 1 {
+            Result::Err("multiple sexps in input")
+        } else {
+            Result::Ok(parse(&tokens[0], interpreter))
+        }
+    }
+}
+
+fn parse_list(tokens: &Vec<Token>, start: usize, interpreter: &mut Interpreter) -> HeapObject {
     let mut list = Box::new(new_list());
     for (i, token) in tokens.into_iter().skip(start).enumerate() {
         match token {
             &Token::ParenOpen => {
-                let obj = parse_list(tokens, i, interpreter);
-                match obj {
-                    Option::Some(hobj) => list.as_mut().push_back(hobj),
-                    Option::None => return Option::Some(interpreter.new_object(Type::Cons(list))),
-                }
+                let obj = parse_list(tokens, i+1, interpreter);
+                list.as_mut().push_back(obj);
             },
             &Token::ParenClose => {
                 if list.len() == 0 {
-                    return Option::Some(interpreter.new_nil());
+                    return interpreter.new_nil();
                 } else {
-                    return Option::None;
+                    return interpreter.new_object(Type::Cons(list));
                 }
             },
             _ => list.as_mut().push_back(parse(token, interpreter)),
@@ -188,7 +233,13 @@ fn parse_list(tokens: &Vec<Token>, start: usize, interpreter: &mut Interpreter) 
 
 fn parse(token: &Token, interpreter: &mut Interpreter) -> HeapObject {
     match token {
-        &Token::Symbol(ref s) => interpreter.new_object(Type::Symbol(s.clone())),
+        &Token::Symbol(ref s) => {
+            match s.as_ref() {
+                "#t" => interpreter.new_true(),
+                "#f" => interpreter.new_false(),
+                _ => interpreter.new_object(Type::Symbol(s.clone())),
+            }
+        },
         &Token::String(ref s) => interpreter.new_object(Type::String(s.clone())),
         &Token::Character(c) => interpreter.new_object(Type::Character(c)),
         &Token::Integer(i) => interpreter.new_object(Type::Integer(i)),
@@ -220,17 +271,6 @@ impl fmt::Debug for ScanError {
 #[cfg(test)]
 mod test {
     use super::*;
-
-    #[test]
-    fn test_scan() {
-        let mut s = Scanner::new();
-        let res = s.scan("(\"hi\" ?c 1 1.2 ())".to_string());
-        let vec = res.unwrap().unwrap();
-        for tok in vec.into_iter() {
-            print!("{} ", tok);
-        }
-        println!("");
-    }
 
     #[test]
     fn test_scan_err() {
