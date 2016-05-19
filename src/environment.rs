@@ -14,6 +14,11 @@ impl Environment {
     }
 
     #[inline(always)]
+    pub fn push_env(&mut self, e: HashMap<String, HeapObject>) {
+        self.0.push(e)
+    }
+
+    #[inline(always)]
     pub fn push(&mut self) {
         self.0.push(HashMap::<String, HeapObject>::new());
     }
@@ -49,8 +54,16 @@ impl Environment {
     pub fn mark_all(&mut self) {
         for env in self.0.iter_mut() {
             for (_, object) in env {
-                object.borrow_mut().mark();
+                object.mark();
             }
         }
+    }
+
+    pub fn cur_env_clone(&self) -> HashMap<String, HeapObject> {
+        let mut cur_env = HashMap::new();
+        for (sym, obj) in self.0.last().unwrap() {
+            cur_env.insert(sym.clone(), obj.clone());
+        }
+        cur_env
     }
 }

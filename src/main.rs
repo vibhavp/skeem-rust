@@ -11,7 +11,7 @@ use std::result::Result;
 
 fn print_result(res: Result<HeapObject, Err>) {
     match res {
-        Result::Ok(obj) => println!("=> {}", *(obj.borrow())),
+        Result::Ok(obj) => println!("=> {}", *(obj.as_ref())),
         Result::Err(err) => println!("error: {}", err),
     }
 }

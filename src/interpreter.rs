@@ -4,7 +4,6 @@ use environment::Environment;
 use std::option::Option;
 use std::result::Result;
 use std::rc::Rc;
-use std::cell::RefCell;
 
 pub struct Interpreter {
     live_objects: Vec<HeapObject>,
@@ -22,9 +21,9 @@ impl Interpreter {
         Interpreter{
             live_objects: Vec::new(),
             environment: Environment::new(),
-            nil: Rc::new(RefCell::new(Box::new(Object::new(Type::Cons(Box::new(new_list())))))),
-            bool_true: Rc::new(RefCell::new(Box::new(Object::new(Type::Bool(true))))),
-            bool_false: Rc::new(RefCell::new(Box::new(Object::new(Type::Bool(false))))),
+            nil: Rc::new(Box::new(Object::new(Type::Cons(Box::new(new_list()))))),
+            bool_true: Rc::new(Box::new(Object::new(Type::Bool(true)))),
+            bool_false: Rc::new(Box::new(Object::new(Type::Bool(false)))),
             gc_disabled: false,
             bytes_alloc: 0,
             gc_threshold: 0,
@@ -48,7 +47,7 @@ impl Interpreter {
             }
         }
 
-        let obj = Rc::new(RefCell::new(Box::new(Object::new(t))));
+        let obj = Rc::new(Box::new(Object::new(t)));
         self.live_objects.push(obj.clone());
         obj
     }
@@ -71,16 +70,17 @@ impl Interpreter {
         let mut indices = Vec::<usize>::new();
 
         for i in 0..self.live_objects.len() {
-            if !self.live_objects[i].borrow().marked {
-                self.bytes_alloc -= self.live_objects[i].borrow().object_type.size_of();
-                assert_eq!(Rc::strong_count(&self.live_objects[i]), 1);
-                assert_eq!(Rc::weak_count(&self.live_objects[i]), 0);
+            let ref obj = self.live_objects[i];
+            if !obj.marked.get() {
+                self.bytes_alloc -= obj.object_type.size_of();
+                assert_eq!(Rc::strong_count(obj), 1);
+                assert_eq!(Rc::weak_count(obj), 0);
                 indices.push(i);
                 count += 1;
-                continue;
-            }
 
-            self.live_objects[i].borrow_mut().marked = false;
+            } else {
+                obj.marked.set(false);
+            }
         }
 
         indices.reverse();
@@ -92,36 +92,46 @@ impl Interpreter {
     }
 
     fn eval_lambda(&mut self, lambda: &Lambda, exp: List) -> Result<HeapObject, Err> {
-        let params = lambda.params.borrow().unwrap_list().clone();
+        let params = lambda.params.unwrap_list().clone();
         if params.len() != exp.len() - 1 {
             return Result::Err(Err::WrongArgsNum{wanted: params.len(), got: exp.len()-1});
         }
 
-        let mut closure = false;
-
-        let mut last = self.nil.clone();
-
-        let mut iter = exp.iter();
-        iter.next();
-        // (lambda (a r g s) body)
-        for obj in exp.iter().skip(2) {
-            let res = self.eval(obj.clone());
-            match res {
-                Result::Ok(obj) => last = obj,
-                Result::Err(err) => {
-                    if closure {
-                        self.environment.pop();
-                    };
-                    return Result::Err(err)
-                }
+        self.environment.push();
+        if let Option::Some(ref env) = lambda.env {
+            self.environment.push();
+            for (sym, obj) in env.iter() {
+                self.environment.insert_sym(sym.clone(), obj.clone());
             }
         }
 
-        if closure {
-            self.environment.pop();
+        //let mut last = self.nil.clone();
+        let mut last = Result::Ok(self.nil.clone());
+
+        /* (lambda-obj p a r a m s)
+         *              ^---------^
+         *              params_iter()
+         */
+        let mut param_syms_iter = exp.iter();
+        for supplied_param in params.iter() {
+            let param_sym = param_syms_iter.next().unwrap();
+            self.environment.insert_sym(param_sym.unwrap_sym(), supplied_param.clone());
         }
 
-        Result::Ok(last)
+        // (lambda (a r g s) body)
+        for obj in lambda.body.unwrap_list().iter() {
+            last = self.eval(obj.clone());
+            if let Result::Err(_) = last {
+                break
+            }
+        }
+
+        if let Option::Some(_) = lambda.env {
+            self.environment.pop();
+        }
+        self.environment.pop();
+
+        last
     }
 
     fn eval_cons(&mut self, c: &List) -> Result<HeapObject, Err> {
@@ -135,12 +145,12 @@ impl Interpreter {
 
         match front {
             Result::Ok(frontval) => {
-                match frontval.borrow().object_type {
+                match frontval.object_type {
                     Type::Procedure(ref p) => match p.as_ref() {
                         &Procedure::Primitive(prim) => prim(c),
                         &Procedure::Lambda(ref lambda) => self.eval_lambda(lambda, c.clone())
                     },
-                    _ => Result::Err(Err::NotCallable(frontval.borrow().get_type_string()))
+                    _ => Result::Err(Err::NotCallable(frontval.get_type_string()))
                 }
             },
             Result::Err(e) => Result::Err(e)
@@ -148,14 +158,16 @@ impl Interpreter {
     }
 
     pub fn eval(&mut self, hobj: HeapObject) -> Result<HeapObject, Err> {
-        match hobj.borrow().object_type {
-            Type::Cons(ref c) => self.eval_cons(c.as_ref()),
-            Type::Symbol(ref sym) => {
-                let val = try!(self.environment.find_sym(sym.clone()));
-                Result::Ok(val.clone())
-            },
+        match hobj.object_type {
+            Type::Cons(ref c) => self.eval_cons(c),
+            Type::Symbol(ref sym) => Result::Ok(try!(self.environment.find_sym(sym.clone())).clone()),
             _ => Result::Ok(hobj.clone()),
         }
+    }
+
+    //builtins
+    pub fn print() {
+
     }
 }
 

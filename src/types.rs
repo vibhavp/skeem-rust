@@ -1,17 +1,16 @@
 use error::Err;
-use environment::Environment;
-use std::collections::LinkedList;
+use std::collections::{LinkedList, HashMap};
 use std::boxed::Box;
 use std::rc::Rc;
-use std::cell::RefCell;
 use std::ops::Add;
 use std::ops::Mul;
 use std::ops::Div;
 use std::fmt;
 use std::option::Option;
 use std::mem::size_of;
+use std::cell::Cell;
 
-pub type HeapObject = Rc<RefCell<Box<Object>>>;
+pub type HeapObject = Rc<Box<Object>>;
 pub type List = LinkedList<HeapObject>;
 
 pub fn new_list() -> List {
@@ -50,22 +49,25 @@ impl Type {
 
 pub struct Object {
     pub object_type: Type,
-    pub marked: bool,
+    pub marked: Cell<bool>,
 }
 
+// (lambda (a r g s) body)
 pub struct Lambda {
-    pub env: Option<Environment>, //type is environment
-    pub params: HeapObject, //type is Cons
-    pub body: HeapObject, //type is Cons
+    pub env: Option<Rc<HashMap<String, HeapObject>>>, //type is environment
+    pub params: HeapObject, //type is Cons, represents (a r g s)
+    pub body: HeapObject, //type is Cons, represents body
 }
 
 impl Lambda {
-    fn mark(&mut self) {
-        if let Some(ref mut env) = self.env {
-            env.mark_all();
+    fn mark(&self) {
+        if let Some(ref env) = self.env {
+            for (_, obj) in env.iter() {
+                obj.mark();
+            }
         }
-        self.params.borrow_mut().mark();
-        self.body.borrow_mut().mark();
+        self.params.mark();
+        self.body.mark();
     }
 }
 
@@ -76,7 +78,7 @@ pub enum Procedure {
 
 impl Object {
     pub fn new(t: Type) -> Object {
-        Object{object_type: t, marked: true}
+        Object{object_type: t, marked: Cell::new(true)}
     }
 
     #[inline]
@@ -85,6 +87,14 @@ impl Object {
             l
         } else {
             panic!("object is not a list")
+        }
+    }
+    #[inline]
+    pub fn unwrap_sym(&self) -> String {
+        if let Type::String(ref s) = self.object_type {
+            s.clone()
+        } else {
+            panic!("object is not a string")
         }
     }
 
@@ -101,39 +111,39 @@ impl Object {
         }
     }
 
-    pub fn mark(&mut self) {
-        if self.marked {
+    pub fn mark(&self) {
+        if self.marked.get() {
             return
         }
 
-        self.marked = true;
+        self.marked.set(true);
         match self.object_type {
-            Type::Cons(ref mut cons) => Object::mark_list(cons),
-            Type::Procedure(ref mut procedure) => Object::mark_procedure(procedure.as_mut()),
+            Type::Cons(ref cons) => Object::mark_list(cons),
+            Type::Procedure(ref procedure) => Object::mark_procedure(procedure),
             _ => {},
         };
     }
 
-    fn mark_procedure(procedure: &mut Procedure) {
+    fn mark_procedure(procedure: &Procedure) {
         match procedure {
-            &mut Procedure::Lambda(ref mut procedure) => {procedure.mark();},
-            &mut Procedure::Primitive(_) => {},
+            &Procedure::Lambda(ref procedure) => {procedure.mark();},
+            &Procedure::Primitive(_) => {},
         }
     }
 
-    fn mark_list(cons: &mut List) {
+    fn mark_list(cons: &List) {
         for obj in cons {
-            obj.borrow_mut().mark();
+            obj.mark();
         }
     }
 
     pub fn add_list(nums: &List) -> Result<Object, Err> {
         let mut sum = Object::new(Type::Integer(0));
         for obj in nums {
-            match obj.borrow().object_type {
+            match obj.object_type {
                 Type::Float(n) => {sum = sum + Object::new(Type::Float(n))},
                 Type::Integer(n) => {sum = sum + Object::new(Type::Integer(n))}
-                _ => return Result::Err(Err::WrongType{wanted: "numberp", got: obj.borrow().get_type_string()})
+                _ => return Result::Err(Err::WrongType{wanted: "numberp", got: obj.get_type_string()})
             }
         }
 
@@ -143,10 +153,10 @@ impl Object {
     pub fn sub_list(nums: &List) -> Result<Object, Err> {
         let mut sum = Object::new(Type::Integer(0));
         for obj in nums {
-            match obj.borrow().object_type {
+            match obj.as_ref().object_type {
                 Type::Float(n) => {sum = sum + Object::new(Type::Float(-n))},
                 Type::Integer(n) => {sum = sum + Object::new(Type::Integer(-n))}
-                _ => return Result::Err(Err::WrongType{wanted: "numberp", got: obj.borrow().get_type_string()})
+                _ => return Result::Err(Err::WrongType{wanted: "numberp", got: obj.get_type_string()})
 
            }
         }
@@ -157,10 +167,10 @@ impl Object {
     pub fn mul_list(nums: &List) -> Result<Object, Err> {
         let mut prod = Object::new(Type::Integer(0));
         for obj in nums {
-            match obj.borrow().object_type {
+            match obj.object_type {
                 Type::Float(n) => {prod = prod * Object::new(Type::Float(n))},
                 Type::Integer(n) => {prod = prod * Object::new(Type::Integer(n))}
-                _ => return Result::Err(Err::WrongType{wanted: "numberp", got: obj.borrow().get_type_string()})
+                _ => return Result::Err(Err::WrongType{wanted: "numberp", got: obj.get_type_string()})
             }
         }
 
@@ -170,10 +180,10 @@ impl Object {
     pub fn div_list(nums: &List) -> Result<Object, Err> {
         let mut prod = Object::new(Type::Integer(0));
         for obj in nums {
-            match obj.borrow().object_type {
+            match obj.object_type {
                 Type::Float(n) => {prod = prod / Object::new(Type::Float(n))},
                 Type::Integer(n) => {prod = prod / Object::new(Type::Integer(n))}
-                _ => return Result::Err(Err::WrongType{wanted: "numberp", got: obj.borrow().get_type_string()})
+                _ => return Result::Err(Err::WrongType{wanted: "numberp", got: obj.get_type_string()})
             }
         }
 
@@ -216,7 +226,7 @@ impl fmt::Display for Object {
                     return write!(f, "nil");
                 }
                 for obj in l.iter() {
-                    let res = write!(f, "{}", *obj.borrow());
+                    let res = write!(f, "{}", *obj.as_ref());
                     match res {
                         Ok(_) => {},
                         Err(e) => return Result::Err(e),
