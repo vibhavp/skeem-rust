@@ -1,14 +1,12 @@
-use error::Err;
+use error::{Err, ErrType};
 use std::collections::{LinkedList, HashMap};
 use std::boxed::Box;
 use std::rc::Rc;
-use std::ops::Add;
-use std::ops::Mul;
-use std::ops::Div;
+use std::cell::Cell;
+use std::ops::{Add, Mul, Div};
 use std::fmt;
 use std::option::Option;
 use std::mem::size_of;
-use std::cell::Cell;
 
 pub type HeapObject = Rc<Box<Object>>;
 pub type List = LinkedList<HeapObject>;
@@ -22,8 +20,8 @@ pub enum Type {
     Integer(i64),
     Float(f64),
     Character(char),
-    String(String),
-    Symbol(String),
+    String(Rc<String>),
+    Symbol(Rc<String>),
 
     Cons(Box<List>),
     Procedure(Box<Procedure>),
@@ -31,14 +29,14 @@ pub enum Type {
 
 impl Type {
     pub fn size_of(&self) -> usize {
-        match self {
-            &Type::Bool(_) => size_of::<bool>(),
-            &Type::Integer(_) => size_of::<i64>(),
-            &Type::Float(_) => size_of::<f64>(),
-            &Type::Character(_) => size_of::<char>(),
-            &Type::String(ref s) | &Type::Symbol(ref s) => size_of::<u8>() * s.capacity(),
-            &Type::Cons(_) => size_of::<List>(),
-            &Type::Procedure(ref p) => {
+        match *self {
+            Type::Bool(_) => size_of::<bool>(),
+            Type::Integer(_) => size_of::<i64>(),
+            Type::Float(_) => size_of::<f64>(),
+            Type::Character(_) => size_of::<char>(),
+            Type::String(ref s) | Type::Symbol(ref s) => size_of::<u8>() * s.capacity(),
+            Type::Cons(_) => size_of::<List>(),
+            Type::Procedure(ref p) => {
                 if let &Procedure::Lambda(_) = p.as_ref() {
                     size_of::<Lambda>()
                 } else {0}
@@ -54,7 +52,7 @@ pub struct Object {
 
 // (lambda (a r g s) body)
 pub struct Lambda {
-    pub env: Option<Rc<HashMap<String, HeapObject>>>, //type is environment
+    pub env: Option<HashMap<Rc<String>, HeapObject>>, //type is environment
     pub params: HeapObject, //type is Cons, represents (a r g s)
     pub body: HeapObject, //type is Cons, represents body
 }
@@ -78,7 +76,7 @@ pub enum Procedure {
 
 impl Object {
     pub fn new(t: Type) -> Object {
-        Object{object_type: t, marked: Cell::new(true)}
+        Object{object_type: t, marked: Cell::new(false)}
     }
 
     #[inline]
@@ -90,7 +88,7 @@ impl Object {
         }
     }
     #[inline]
-    pub fn unwrap_sym(&self) -> String {
+    pub fn unwrap_sym(&self) -> Rc<String> {
         if let Type::String(ref s) = self.object_type {
             s.clone()
         } else {
@@ -137,26 +135,34 @@ impl Object {
         }
     }
 
-    pub fn add_list(nums: &List) -> Result<Object, Err> {
+    pub fn is_true(&self) -> bool {
+        if let Type::Bool(b) = self.object_type {
+            b
+        } else {
+            true
+        }
+    }
+    
+    pub fn add_list(nums: &List) -> Result<Object, ErrType> {
         let mut sum = Object::new(Type::Integer(0));
         for obj in nums {
             match obj.object_type {
                 Type::Float(n) => {sum = sum + Object::new(Type::Float(n))},
                 Type::Integer(n) => {sum = sum + Object::new(Type::Integer(n))}
-                _ => return Result::Err(Err::WrongType{wanted: "numberp", got: obj.get_type_string()})
+                _ => return Result::Err(ErrType::WrongType{wanted: "numberp", got: obj.get_type_string()})
             }
         }
 
         Result::Ok(sum)
     }
 
-    pub fn sub_list(nums: &List) -> Result<Object, Err> {
+    pub fn sub_list(nums: &List) -> Result<Object, ErrType> {
         let mut sum = Object::new(Type::Integer(0));
         for obj in nums {
             match obj.as_ref().object_type {
                 Type::Float(n) => {sum = sum + Object::new(Type::Float(-n))},
                 Type::Integer(n) => {sum = sum + Object::new(Type::Integer(-n))}
-                _ => return Result::Err(Err::WrongType{wanted: "numberp", got: obj.get_type_string()})
+                _ => return Result::Err(ErrType::WrongType{wanted: "numberp", got: obj.get_type_string()})
 
            }
         }
@@ -164,26 +170,26 @@ impl Object {
         Result::Ok(sum)
     }
 
-    pub fn mul_list(nums: &List) -> Result<Object, Err> {
+    pub fn mul_list(nums: &List) -> Result<Object, ErrType> {
         let mut prod = Object::new(Type::Integer(0));
         for obj in nums {
             match obj.object_type {
                 Type::Float(n) => {prod = prod * Object::new(Type::Float(n))},
                 Type::Integer(n) => {prod = prod * Object::new(Type::Integer(n))}
-                _ => return Result::Err(Err::WrongType{wanted: "numberp", got: obj.get_type_string()})
+                _ => return Result::Err(ErrType::WrongType{wanted: "numberp", got: obj.get_type_string()})
             }
         }
 
         Result::Ok(prod)
     }
 
-    pub fn div_list(nums: &List) -> Result<Object, Err> {
+    pub fn div_list(nums: &List) -> Result<Object, ErrType> {
         let mut prod = Object::new(Type::Integer(0));
         for obj in nums {
             match obj.object_type {
                 Type::Float(n) => {prod = prod / Object::new(Type::Float(n))},
                 Type::Integer(n) => {prod = prod / Object::new(Type::Integer(n))}
-                _ => return Result::Err(Err::WrongType{wanted: "numberp", got: obj.get_type_string()})
+                _ => return Result::Err(ErrType::WrongType{wanted: "numberp", got: obj.get_type_string()})
             }
         }
 
@@ -237,7 +243,7 @@ impl fmt::Display for Object {
             Type::Procedure(_) => {
                 write!(f, "procedure")
             },
-            Type::Symbol(_) => panic!("write! used on symbol")
+            Type::Symbol(_) => unreachable!()
         }
     }
 }
@@ -292,13 +298,13 @@ mod test {
 
     #[test]
     fn test_ops() {
-        let mut o3 = Object::new(Type::Integer(1)) + Object::new(Type::Float(2.0));
+        let o3 = Object::new(Type::Integer(1)) + Object::new(Type::Float(2.0));
         match o3.object_type {
             Type::Float(n) => {assert_eq!(n, 3.0)},
             _ => panic!("o3 should be a float")
         };
 
-        let mut o3 = Object::new(Type::Integer(2)) * Object::new(Type::Float(2.0));
+        let o3 = Object::new(Type::Integer(2)) * Object::new(Type::Float(2.0));
         match o3.object_type {
             Type::Float(n) => {assert_eq!(n, 4.0)},
             _ => panic!("o3 should be a float")

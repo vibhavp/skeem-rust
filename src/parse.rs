@@ -6,6 +6,7 @@ use std::option::Option;
 use std::fmt;
 use std::str::FromStr;
 use std::fmt::Write;
+use std::rc::Rc;
 use interpreter::Interpreter;
 use types::{Type, new_list, HeapObject};
 
@@ -13,26 +14,26 @@ pub enum Token {
     ParenOpen,
     ParenClose,
 
-    Symbol(String),
-    String(String),
+    Symbol(Rc<String>),
+    String(Rc<String>),
     Character(char),
     Integer(i64),
     Float(f64),
 }
 
-impl Clone for Token {
-    fn clone(&self) -> Token {
-        match self {
-            &Token::ParenOpen => Token::ParenOpen,
-            &Token::ParenClose => Token::ParenClose,
-            &Token::String(ref s) => Token::String(s.clone()),
-            &Token::Symbol(ref s) => Token::Symbol(s.clone()),
-            &Token::Character(c) => Token::Character(c),
-            &Token::Integer(i) => Token::Integer(i),
-            &Token::Float(f) => Token::Float(f),
-        }
-    }
-}
+// impl Clone for Token {
+//     fn clone(&self) -> Token {
+//         match self {
+//             &Token::ParenOpen => Token::ParenOpen,
+//             &Token::ParenClose => Token::ParenClose,
+//             &Token::String(ref s) => Token::String(s.clone()),
+//             &Token::Symbol(ref s) => Token::Symbol(s.clone()),
+//             &Token::Character(c) => Token::Character(c),
+//             &Token::Integer(i) => Token::Integer(i),
+//             &Token::Float(f) => Token::Float(f),
+//         }
+//     }
+// }
 
 pub enum ScanError {
     UnmatchedParen,
@@ -96,9 +97,9 @@ impl Scanner{
         }
 
         return Option::Some(if self.scanning_string {
-            Token::String(word.clone())
+            Token::String(Rc::new(word.clone()))
         } else {
-            Token::Symbol(word.clone())
+            Token::Symbol(Rc::new(word.clone()))
         })
     }
 
@@ -125,7 +126,7 @@ impl Scanner{
             match ch {
                 '\"' => {
                     if self.scanning_string {
-                        tokens.push(Token::String(word.clone()));
+                        tokens.push(Token::String(Rc::new(word.clone())));
                         word.clear();
                     }
 
@@ -176,7 +177,7 @@ impl Scanner{
         }
 
         if self.scanning_incomplete() {
-            for token in tokens.clone() {
+            for token in tokens {
                 println!("{}", token);
             }
 
@@ -187,7 +188,7 @@ impl Scanner{
             self.incomplete_str = Option::Some(incomplete_str);
             Option::None
         } else {
-            for token in tokens.clone() {
+            for token in &tokens {
                 println!("{}", token);
             }
             //flush last token
@@ -212,12 +213,12 @@ pub fn parse_sexp(tokens: &Vec<Token>, interpreter: &mut Interpreter) -> Result<
 fn parse_list(tokens: &Vec<Token>, start: usize, interpreter: &mut Interpreter) -> HeapObject {
     let mut list = Box::new(new_list());
     for (i, token) in tokens.into_iter().skip(start).enumerate() {
-        match token {
-            &Token::ParenOpen => {
+        match *token {
+            Token::ParenOpen => {
                 let obj = parse_list(tokens, i+1, interpreter);
                 list.as_mut().push_back(obj);
             },
-            &Token::ParenClose => {
+            Token::ParenClose => {
                 if list.len() == 0 {
                     return interpreter.new_nil();
                 } else {
@@ -232,32 +233,32 @@ fn parse_list(tokens: &Vec<Token>, start: usize, interpreter: &mut Interpreter) 
 }
 
 fn parse(token: &Token, interpreter: &mut Interpreter) -> HeapObject {
-    match token {
-        &Token::Symbol(ref s) => {
-            match s.as_ref() {
+    match *token {
+        Token::Symbol(ref s) => {
+            match s.as_str() {
                 "#t" => interpreter.new_true(),
                 "#f" => interpreter.new_false(),
                 _ => interpreter.new_object(Type::Symbol(s.clone())),
             }
         },
-        &Token::String(ref s) => interpreter.new_object(Type::String(s.clone())),
-        &Token::Character(c) => interpreter.new_object(Type::Character(c)),
-        &Token::Integer(i) => interpreter.new_object(Type::Integer(i)),
-        &Token::Float(f) => interpreter.new_object(Type::Float(f)),
-        &Token::ParenOpen | &Token::ParenClose => panic!("cannot parse parens")
+        Token::String(ref s) => interpreter.new_object(Type::String(s.clone())),
+        Token::Character(c) => interpreter.new_object(Type::Character(c)),
+        Token::Integer(i) => interpreter.new_object(Type::Integer(i)),
+        Token::Float(f) => interpreter.new_object(Type::Float(f)),
+        Token::ParenOpen | Token::ParenClose => panic!("cannot parse parens")
     }
 }
 
 impl fmt::Display for Token {
     fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
-        match self {
-            &Token::ParenOpen => write!(f, "("),
-            &Token::ParenClose => write!(f, ")"),
-            &Token::Symbol(ref s) => write!(f, "[sym {}]", s),
-            &Token::String(ref s) => write!(f,"\"{}\"", s),
-            &Token::Character(c) => write!(f, "?{}", c),
-            &Token::Integer(i) => write!(f, "[i {}]", i),
-            &Token::Float(fl) => write!(f, "[f {}]", fl),
+        match *self {
+            Token::ParenOpen => write!(f, "("),
+            Token::ParenClose => write!(f, ")"),
+            Token::Symbol(ref s) => write!(f, "[sym {}]", s),
+            Token::String(ref s) => write!(f,"\"{}\"", s),
+            Token::Character(c) => write!(f, "?{}", c),
+            Token::Integer(i) => write!(f, "[i {}]", i),
+            Token::Float(fl) => write!(f, "[f {}]", fl),
         }
    }
 }

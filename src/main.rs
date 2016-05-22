@@ -21,17 +21,21 @@ fn main() {
     let mut scanner = Scanner::new();
     let stdin = io::stdin();
 
-    if cfg!(debug) {
-                println!("skeem debug buil");
-    }
     print!("LISP> ");
     io::stdout().flush().unwrap();
     loop {
         i.gc_disable();
         let mut line = String::new();
-        stdin.read_line(&mut line).unwrap();
+        if let Result::Err(e) = stdin.read_line(&mut line) {
+            println!("{}", e);
+            return;
+        };
 
-        i.gc_disable();
+        if line.chars().nth(0).unwrap() == '\n' {
+            print!("LISP> ");
+            io::stdout().flush().unwrap();
+            continue;
+        }
         let opt = scanner.scan(line);
 
         if let Option::Some(res) = opt {

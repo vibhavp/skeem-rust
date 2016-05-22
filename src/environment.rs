@@ -1,10 +1,11 @@
 use std::collections::HashMap;
 use std::result::Result;
 use std::option::Option;
+use std::rc::Rc;
 use types::HeapObject;
-use error::Err;
+use error::ErrType;
 
-pub struct Environment(Vec<HashMap<String, HeapObject>>);
+pub struct Environment(Vec<HashMap<Rc<String>, HeapObject>>);
 
 impl Environment {
     pub fn new() -> Environment {
@@ -14,13 +15,13 @@ impl Environment {
     }
 
     #[inline(always)]
-    pub fn push_env(&mut self, e: HashMap<String, HeapObject>) {
+    pub fn push_env(&mut self, e: HashMap<Rc<String>, HeapObject>) {
         self.0.push(e)
     }
 
     #[inline(always)]
     pub fn push(&mut self) {
-        self.0.push(HashMap::<String, HeapObject>::new());
+        self.0.push(HashMap::new());
     }
 
     #[inline(always)]
@@ -29,16 +30,16 @@ impl Environment {
     }
 
     #[inline(always)]
-    pub fn insert_sym(&mut self, name: String, value: HeapObject) {
+    pub fn insert_sym(&mut self, name: Rc<String>, value: HeapObject) {
         self.0.last_mut().unwrap().insert(name, value);
     }
 
-    pub fn find_sym(&self, name: String) -> Result<&HeapObject, Err> {
+    pub fn find_sym(&self, name: Rc<String>) -> Result<&HeapObject, ErrType> {
         if self.0.len() == 1 {
             let val = self.0[0].get(&name);
             return match val {
                 Option::Some(val) => Result::Ok(val),
-                Option::None => Result::Err(Err::SymbolNotFound(name))
+                Option::None => Result::Err(ErrType::SymbolNotFound(name))
             }
         }
 
@@ -48,7 +49,7 @@ impl Environment {
             }
         }
 
-        Result::Err(Err::SymbolNotFound(name))
+        Result::Err(ErrType::SymbolNotFound(name))
     }
 
     pub fn mark_all(&mut self) {
@@ -59,11 +60,8 @@ impl Environment {
         }
     }
 
-    pub fn cur_env_clone(&self) -> HashMap<String, HeapObject> {
-        let mut cur_env = HashMap::new();
-        for (sym, obj) in self.0.last().unwrap() {
-            cur_env.insert(sym.clone(), obj.clone());
-        }
-        cur_env
+    #[inline(always)]
+    pub fn cur_env_pop(&mut self) -> HashMap<Rc<String>, HeapObject> {
+        self.0.pop().unwrap()
     }
 }
